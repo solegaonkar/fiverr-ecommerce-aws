@@ -32,7 +32,7 @@ const createToken = (info) => {
       exp: Math.floor(Date.now() / 1000) + 86400,
       data: info,
     },
-    process.env.SECRET
+    process.env.SECRET || "SECRET"
   );
   return { token };
 };
@@ -75,14 +75,14 @@ const extractEventDetails = (event) => ({
  * @param {*} response
  * @returns
  */
-const respond = (response) => ({
+const respond = async (response) => ({
   statusCode: 200,
   headers: {
     "Access-Control-Allow-Headers": "*",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "*",
   },
-  body: JSON.stringify(response),
+  body: JSON.stringify(await response),
 });
 
 /**
@@ -113,7 +113,7 @@ const login = async (data) => {
  * @returns
  */
 const createOrder = async (data) => {
-  var order = { context: "order", id: nanoid(), ...data };
+  var order = { context: "order", id: nanoid(), ...data, orderStatus: "OPEN" };
   await ddb
     .put({
       TableName: TABLE_NAME,
@@ -137,11 +137,31 @@ const completeOrder = async (data) => {
         context: "order",
         id: data.id,
       },
+      UpdateExpression: "set orderStatus = :c",
+      ExpressionAttributeValues: {
+        ":c": "CLOSED",
+      },
     })
     .promise();
   return { success: true };
 };
 
+const reopenOrder = async (data) => {
+  await ddb
+    .update({
+      TableName: TABLE_NAME,
+      Key: {
+        context: "order",
+        id: data.id,
+      },
+      UpdateExpression: "set orderStatus = :c",
+      ExpressionAttributeValues: {
+        ":c": "OPEN",
+      },
+    })
+    .promise();
+  return { success: true };
+};
 /**
  * Get the list of items available for sale at the store.
  *
@@ -162,13 +182,31 @@ const getItemList = async (data) => {
 };
 
 /**
+ * Get list of orders
+ *
+ * @returns
+ */
+const getOrderList = async () => {
+  var response = await ddb
+    .query({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "context = :i",
+      ExpressionAttributeValues: {
+        ":i": "order",
+      },
+    })
+    .promise();
+  return response.Items;
+};
+
+/**
  * Add a new item for sale.
  *
  * @param {*} data
  */
 const addItem = async (data) => {
   var item = { context: "item", id: nanoid(), ...data };
-  var response = await ddb
+  await ddb
     .put({
       TableName: TABLE_NAME,
       Item: item,
@@ -191,44 +229,6 @@ const removeItem = async (data) => {
     .promise();
 };
 
-const init = async () => {
-  var items = [
-    { context: "item", id: "1", image: "images/product01.jpg", price: 10, title: "Tank Top", description: "" },
-    { context: "item", id: "2", image: "images/product02.jpg", price: 10, title: "Polo-Shirt", description: "" },
-    { context: "item", id: "3", image: "images/product03.jpg", price: 10, title: "T-Shirt", description: "" },
-    { context: "user", id: "admin", password: "cac28395540089e505a68311833c2cb5a92f84f4" },
-    {
-      context: "order",
-      id: "1",
-      image: "images/product01.jpg",
-      price: 10,
-      title: "Tank Top",
-      buyerName: "Mark Zucherberg",
-      buyerAddress: "1 Hacker Way, Menlo Park, 94025 CA, United States of America.",
-    },
-    {
-      context: "order",
-      id: "2",
-      image: "images/product02.jpg",
-      price: 10,
-      title: "Polo-Shirt",
-      buyerName: "Sundar Pitchai",
-      buyerAddress: "1600 Amphitheatre Parkway, Mountain View, CA 94043",
-    },
-    {
-      context: "order",
-      id: "3",
-      image: "images/product03.jpg",
-      price: 10,
-      title: "T-Shirt",
-      buyerName: "Andy Jassy",
-      buyerAddress: "410 Terry Ave N, Seattle, Washington 98109, US",
-    },
-  ];
-  var pList = items.map((i) => docClient.put({ TableName: "EcommerceData", Item: i }).promise());
-  await Promise.all(pList).then((x) => console.log("Done"));
-};
-
 /**
  * The main input method for the Lambda function
  *
@@ -246,8 +246,12 @@ exports.handler = async (event) => {
       return respond(login(data));
     case "ADD_ORDER":
       return respond(createOrder(data));
+    case "ORDER_LIST":
+      return respond(getOrderList(data));
     case "COMPLETE_ORDER":
       return respond(completeOrder(data));
+    case "REOPEN_ORDER":
+      return respond(reopenOrder(data));
     case "ITEM_LIST":
       return respond(getItemList(data));
     case "ADD_ITEM":
@@ -256,5 +260,43 @@ exports.handler = async (event) => {
       return respond(removeItem(data));
   }
 
-  return respond(response);
+  return respond({});
+};
+
+const init = async () => {
+  var items = [
+    { context: "item", id: "1", image: "images/product01.jpg", price: 10, title: "Tank Top", description: "" },
+    { context: "item", id: "2", image: "images/product02.jpg", price: 10, title: "Polo-Shirt", description: "" },
+    { context: "item", id: "3", image: "images/product03.jpg", price: 10, title: "T-Shirt", description: "" },
+    { context: "user", id: "admin", password: "cac28395540089e505a68311833c2cb5a92f84f4" },
+    {
+      context: "order",
+      id: "1",
+      orderStatus: "OPEN",
+      price: 10,
+      title: "Tank Top",
+      buyerName: "Mark Zucherberg",
+      buyerAddress: "1 Hacker Way, Menlo Park, 94025 CA, United States of America.",
+    },
+    {
+      context: "order",
+      id: "2",
+      orderStatus: "OPEN",
+      price: 10,
+      title: "Polo-Shirt",
+      buyerName: "Sundar Pitchai",
+      buyerAddress: "1600 Amphitheatre Parkway, Mountain View, CA 94043",
+    },
+    {
+      context: "order",
+      id: "3",
+      orderStatus: "OPEN",
+      price: 10,
+      title: "T-Shirt",
+      buyerName: "Andy Jassy",
+      buyerAddress: "410 Terry Ave N, Seattle, Washington 98109, US",
+    },
+  ];
+  var pList = items.map((i) => ddb.put({ TableName: "EcommerceData", Item: i }).promise());
+  await Promise.all(pList).then((x) => console.log("Done"));
 };
