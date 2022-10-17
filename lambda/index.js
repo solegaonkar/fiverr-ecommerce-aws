@@ -7,7 +7,7 @@
  * Copyright (c) 2022 Vikas K Solegaonkar                                      *
  * Crystal Cloud Solutions (https://crystalcloudsolutions.com)                 *
  *                                                                             *
- * Last Modified: Sun Oct 16 2022                                              *
+ * Last Modified: Mon Oct 17 2022                                              *
  * Modified By: Vikas K Solegaonkar                                            *
  *                                                                             *
  * HISTORY:                                                                    *
@@ -162,6 +162,16 @@ const reopenOrder = async (data) => {
     .promise();
   return { success: true };
 };
+
+const deleteOrder = async (data) => {
+  await ddb
+    .delete({
+      TableName: TABLE_NAME,
+      Key: { context: "order", id: data.id },
+    })
+    .promise();
+};
+
 /**
  * Get the list of items available for sale at the store.
  *
@@ -252,6 +262,8 @@ exports.handler = async (event) => {
       return respond(completeOrder(data));
     case "REOPEN_ORDER":
       return respond(reopenOrder(data));
+    case "DELETE_ORDER":
+      return respond(deleteOrder(data));
     case "ITEM_LIST":
       return respond(getItemList(data));
     case "ADD_ITEM":
